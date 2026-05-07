@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Brotato DLC - Chromebook Edition</title>
+
+    <script src="coi-serviceworker.js"></script>
+
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700&display=swap" rel="stylesheet">
+
+    <style>
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #1a1a1a; }
+        #canvas { display: block; width: 100vw; height: 100vh; position: fixed; top: 0; left: 0; border: none; outline: none; z-index: 5; }
+
+        .ui-layer {
+            position: relative; z-index: 10; height: 100vh; display: flex;
+            flex-direction: column; align-items: center; justify-content: center;
+            background: linear-gradient(135deg, #2e3244 0%, #36224b 100%);
+            font-family: 'Orbitron', sans-serif; color: white;
+        }
+
+        #status { font-size: 18px; color: #79aadb; margin-bottom: 20px; text-align: center; }
+
+        #start-btn {
+            padding: 20px 50px; font-size: 18px; cursor: pointer;
+            background: rgba(89, 134, 218, 0.2); color: white;
+            border: 2px solid #79aadb; border-radius: 10px;
+        }
+
+        .progress-container { width: 300px; height: 10px; background: rgba(0,0,0,0.5); border-radius: 5px; overflow: hidden; display: none; }
+        #progress-bar { width: 0%; height: 100%; background: #79aadb; transition: width 0.2s; }
+    </style>
+</head>
+<body>
+
+    <div class="ui-layer" id="launcher-ui">
+        <h1>BROTATO DLC</h1>
+        <div id="status">LOCAL SYNC READY</div>
+        <div class="progress-container" id="p-container"><div id="progress-bar"></div></div>
+        <button id="start-btn">LAUNCH GAME</button>
+    </div>
+
+    <canvas id="canvas"></canvas>
+
+<script>
+(function() {
+    'use strict';
+
+    // Using "./" means the browser looks in the SAME folder as this HTML file.
+    // This is the best way to bypass "Cross-Origin" blocks.
+    const BASE = "./";
+
+    const statusEl = document.getElementById('status');
+    const progressEl = document.getElementById('progress-bar');
+    const pContainer = document.getElementById('p-container');
+    const mergedData = {};
+    const pendingRequests = {};
+
+    const originalFetch = window.fetch;
+    window.fetch = function(url, ...args) {
+        const u = url.toString();
+        if (u.includes("index1.pck") || u.includes("index1.wasm")) {
+            const f = u.includes(".pck") ? "index1.pck" : "index1.wasm";
+            if (mergedData[f]) return Promise.resolve(new Response(mergedData[f]));
+            return new Promise(res => {
+                if (!pendingRequests[f]) pendingRequests[f] = [];
+                pendingRequests[f].push(res);
+            });
+        }
+        return originalFetch(url, ...args);
+    };
+
+    async function fetchPart(name) {
+        const r = await originalFetch(BASE + name);
+        if (!r.ok) throw new Error("File Missing: " + name);
+        return await r.arrayBuffer();
+    }
+
+    document.getElementById('start-btn').onclick = async () => {
+        document.getElementById('start-btn').style.display = 'none';
+        pContainer.style.display = 'block';
+
+        try {
+            statusEl.innerText = "Downloading Game Parts...";
+
+            // Fetching WASM
+            const wasmPart = await fetchPart("index1.wasm.part1");
+            mergedData['index1.wasm'] = new Blob([wasmPart], { type: 'application/octet-stream' });
+            progressEl.style.width = "25%";
+
+            // Fetching PCK Parts
+            const p1 = await fetchPart("index1.pck.part1"); progressEl.style.width = "50%";
+            const p2 = await fetchPart("index1.pck.part2"); progressEl.style.width = "75%";
+            const p3 = await fetchPart("index1.pck.part3"); progressEl.style.width = "100%";
+
+            mergedData['index1.pck'] = new Blob([p1, p2, p3], { type: 'application/octet-stream' });
+
+            statusEl.innerText = "Initializing Engine...";
+
+            const s = document.createElement('script');
+            s.src = BASE + "index1.js";
+            s.onload = () => {
+                const engine = new Engine({
+                    "args":[], "canvasResizePolicy":2, "executable":"index1",
+                    "fileSizes":{"index1.pck":201326592, "index1.wasm":25701650},
+                    "focusCanvas":true
+                });
+                engine.startGame().then(() => {
+                    document.getElementById('launcher-ui').style.display = 'none';
+                });
+            };
+            document.body.appendChild(s);
+        } catch (e) {
+            statusEl.innerHTML = "<span style='color:#ff6b6b'>ERROR: DATA BLOCKED BY SCHOOL</span>";
+            console.error(e);
+        }
+    };
+})();
+</script>
+</body>
+</html>
